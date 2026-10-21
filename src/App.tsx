@@ -17,7 +17,7 @@ import {
   ListFilter,
   AlertTriangle,
   UserX,
-  CheckCircle2
+  LogIn
 } from 'lucide-react';
 
 // ==========================================
@@ -154,9 +154,18 @@ export const COMMON_CRITERIA_MAP: Record<string, { label: string; points: number
 
 export default function App() {
   // Auth state
-  const [user, setUser] = useState<UserAccount | null>(null);
+  const [user, setUser] = useState<UserAccount | null>(() => {
+    const savedSession = localStorage.getItem('thpt_thi_dua_user_session');
+    if (savedSession) {
+      try { return JSON.parse(savedSession); } catch (e) { console.error(e); }
+    }
+    return null; // Mặc định chưa đăng nhập -> Khách/Người xem
+  });
+
+  const [showLoginModal, setShowLoginModal] = useState<boolean>(false);
   const [loginSelectedAccount, setLoginSelectedAccount] = useState<string>('11A5');
-  const [loginPassword, setLoginPassword] = useState<string>('123');
+  const [loginPassword, setLoginPassword] = useState<string>('');
+  const [loginError, setLoginError] = useState<string>('');
 
   // App navigation & week
   const [activeTab, setActiveTab] = useState<'input' | 'summary' | 'students' | 'report'>('input');
@@ -214,21 +223,42 @@ export default function App() {
     return dataStore[week][cls];
   };
 
-  // Login handler
+  // Login handler với kiểm tra mật khẩu chính xác
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
+    setLoginError('');
+
+    let expectedPassword = '';
+    let accountObj: UserAccount | null = null;
+
     if (loginSelectedAccount === 'admin') {
-      setUser({ role: 'admin', targetClass: CLASSES[0] });
-      setTargetClass(CLASSES[0]);
+      expectedPassword = 'Admin@tts2026';
+      accountObj = { role: 'admin', targetClass: CLASSES[0] };
     } else {
-      setUser({ role: 'class', targetClass: loginSelectedAccount });
-      setTargetClass(loginSelectedAccount);
-      setStudentTabClass(loginSelectedAccount);
+      expectedPassword = `${loginSelectedAccount}@tts2026`;
+      accountObj = { role: 'class', targetClass: loginSelectedAccount };
     }
+
+    if (loginPassword.trim() !== expectedPassword) {
+      setLoginError('Mật khẩu không chính xác!');
+      return;
+    }
+
+    // Đăng nhập thành công
+    setUser(accountObj);
+    localStorage.setItem('thpt_thi_dua_user_session', JSON.stringify(accountObj));
+    if (accountObj.role === 'class') {
+      setTargetClass(accountObj.targetClass);
+      setStudentTabClass(accountObj.targetClass);
+    }
+    setShowLoginModal(false);
+    setLoginPassword('');
+    setLoginError('');
   };
 
   const handleLogout = () => {
     setUser(null);
+    localStorage.removeItem('thpt_thi_dua_user_session');
   };
 
   // Mutation Helper
@@ -256,6 +286,10 @@ export default function App() {
 
   // Tab 1: Update Common Criteria (+ / -)
   const handleUpdateCommon = (code: string, delta: number) => {
+    if (!user) {
+      setShowLoginModal(true);
+      return;
+    }
     if (isSystemLocked && user?.role !== 'admin') return;
 
     updateClassData(currentWeek, targetClass, (prev) => {
@@ -273,6 +307,10 @@ export default function App() {
 
   // Tab 1: Apply SBD string input (e.g. "06-10-14")
   const handleApplySBD = (code: string) => {
+    if (!user) {
+      setShowLoginModal(true);
+      return;
+    }
     if (isSystemLocked && user?.role !== 'admin') return;
     const rawValue = sbdInputs[code] || '';
     if (!rawValue.trim()) return;
@@ -296,6 +334,7 @@ export default function App() {
 
   // Tab 1: Remove an entry chip
   const handleRemoveIndividualEntry = (code: string, indexToRemove: number) => {
+    if (!user) return;
     if (isSystemLocked && user?.role !== 'admin') return;
 
     updateClassData(currentWeek, targetClass, (prev) => {
@@ -314,6 +353,10 @@ export default function App() {
   // Tab 1: Select student from modal picker
   const handleSelectStudentModal = (stt: string) => {
     if (!activeModalCode) return;
+    if (!user) {
+      setShowLoginModal(true);
+      return;
+    }
     if (isSystemLocked && user?.role !== 'admin') return;
 
     updateClassData(currentWeek, targetClass, (prev) => {
@@ -365,62 +408,7 @@ export default function App() {
 
   // Current active data for target class
   const activeClassData = getWeekClassData(currentWeek, targetClass);
-  const isEditingLocked = isSystemLocked && user?.role !== 'admin';
-
-  // Render Login Screen if not authenticated
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 antialiased">
-        <form onSubmit={handleLogin} className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-sm p-6 space-y-4">
-          <div className="text-center space-y-1.5">
-            <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold text-xl mx-auto shadow-md">
-              <ShieldCheck className="w-6 h-6" />
-            </div>
-            <h2 className="text-base font-extrabold text-slate-800 pt-1">ĐĂNG NHẬP HỆ THỐNG</h2>
-            <p className="text-xs text-slate-500 font-medium">Quản Lý Thi Đua Học Sinh THPT</p>
-          </div>
-
-          <div className="space-y-3 pt-2">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Tài Khoản Lớp / Admin:</label>
-              <select
-                value={loginSelectedAccount}
-                onChange={(e) => setLoginSelectedAccount(e.target.value)}
-                className="w-full text-xs font-semibold bg-slate-50 border border-slate-300 rounded-xl p-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              >
-                <optgroup label="Tài Khoản Quản Trị">
-                  <option value="admin">Quản Trị Viên (Admin / Đoàn Trường)</option>
-                </optgroup>
-                <optgroup label="17 Tài Khoản Lớp">
-                  {CLASSES.map((cls) => (
-                    <option key={cls} value={cls}>Lớp {cls}</option>
-                  ))}
-                </optgroup>
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">Mật khẩu (Mặc định: 123):</label>
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={(e) => setLoginPassword(e.target.value)}
-                className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl p-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                placeholder="Nhập mật khẩu..."
-              />
-            </div>
-
-            <button
-              type="submit"
-              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md transition-all active:scale-[0.98]"
-            >
-              Vào Hệ Thống
-            </button>
-          </div>
-        </form>
-      </div>
-    );
-  }
+  const isEditingLocked = !user || (isSystemLocked && user?.role !== 'admin');
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col antialiased">
@@ -437,7 +425,7 @@ export default function App() {
                 <span className="font-bold text-slate-800 text-sm sm:text-base">
                   TUẦN {currentWeek} (19/10 - 23/10/2026)
                 </span>
-                {isEditingLocked ? (
+                {isSystemLocked ? (
                   <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-100 text-rose-700 flex items-center gap-1">
                     <Lock className="w-3 h-3" /> KHÓA THỨ 6 (21:00)
                   </span>
@@ -448,14 +436,14 @@ export default function App() {
                 )}
               </div>
               <p className="text-xs text-slate-500 font-medium">
-                Hạn chốt: <span class="font-semibold text-slate-700">21:00 Thứ 6 hàng tuần</span> | Học Kỳ I (2026-2027)
+                Hạn chốt: <span className="font-semibold text-slate-700">21:00 Thứ 6 hàng tuần</span> | Học Kỳ I (2026-2027)
               </p>
             </div>
           </div>
 
           <div className="flex items-center gap-2 ms-auto">
             {/* Admin Week Selector */}
-            {user.role === 'admin' && (
+            {user?.role === 'admin' && (
               <select
                 value={currentWeek}
                 onChange={(e) => setCurrentWeek(Number(e.target.value))}
@@ -467,19 +455,28 @@ export default function App() {
               </select>
             )}
 
-            <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
-              <UserCheck className="w-4 h-4 text-blue-600" />
-              <span className="text-xs font-bold text-slate-700">
-                {user.role === 'admin' ? 'ADMIN (Đoàn Trường)' : `Lớp ${user.targetClass}`}
-              </span>
+            {user ? (
+              <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
+                <UserCheck className="w-4 h-4 text-blue-600" />
+                <span className="text-xs font-bold text-slate-700">
+                  {user.role === 'admin' ? 'ADMIN (Đoàn Trường)' : `Lớp ${user.targetClass}`}
+                </span>
+                <button
+                  onClick={handleLogout}
+                  className="text-xs text-rose-600 hover:text-rose-800 font-semibold ms-1 border-s border-slate-300 ps-2"
+                  title="Đăng xuất"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
               <button
-                onClick={handleLogout}
-                className="text-xs text-rose-600 hover:text-rose-800 font-semibold ms-1 border-s border-slate-300 ps-2"
-                title="Đăng xuất"
+                onClick={() => setShowLoginModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow-sm transition-all"
               >
-                <LogOut className="w-3.5 h-3.5" />
+                <LogIn className="w-4 h-4" /> Đăng Nhập
               </button>
-            </div>
+            )}
           </div>
         </header>
 
@@ -528,8 +525,24 @@ export default function App() {
           {/* TAB 1: NHẬP ĐIỂM */}
           {activeTab === 'input' && (
             <div className="space-y-3">
+              {/* Alert nếu chưa đăng nhập */}
+              {!user && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-blue-800 text-xs font-semibold flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4 text-blue-600 shrink-0" />
+                    Bạn đang ở chế độ xem. Vui lòng đăng nhập để thực hiện nhập điểm thi đua!
+                  </span>
+                  <button
+                    onClick={() => setShowLoginModal(true)}
+                    className="px-2.5 py-1 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-xs font-bold whitespace-nowrap ml-2"
+                  >
+                    Đăng nhập ngay
+                  </button>
+                </div>
+              )}
+
               {/* Warning alert if locked for regular class accounts */}
-              {isEditingLocked && (
+              {user && isSystemLocked && user.role !== 'admin' && (
                 <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 text-amber-800 text-xs font-semibold flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                   <span>
@@ -539,7 +552,7 @@ export default function App() {
               )}
 
               {/* Admin target class picker */}
-              {user.role === 'admin' && (
+              {user?.role === 'admin' && (
                 <div className="bg-white p-2.5 rounded-xl border border-slate-200 flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-600 whitespace-nowrap flex items-center gap-1">
                     <ShieldCheck className="w-4 h-4 text-blue-600" /> ADMIN chọn lớp chấm:
@@ -653,7 +666,10 @@ export default function App() {
                                   </button>
                                   <button
                                     disabled={isEditingLocked}
-                                    onClick={() => setActiveModalCode(item.code)}
+                                    onClick={() => {
+                                      if (!user) setShowLoginModal(true);
+                                      else setActiveModalCode(item.code);
+                                    }}
                                     className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-md whitespace-nowrap disabled:opacity-40"
                                   >
                                     Chọn từ DS
@@ -721,7 +737,7 @@ export default function App() {
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse">
                   <thead>
-                    <tr class="bg-slate-50 text-slate-500 uppercase text-[11px] font-bold border-b border-slate-200">
+                    <tr className="bg-slate-50 text-slate-500 uppercase text-[11px] font-bold border-b border-slate-200">
                       <th className="py-2.5 px-4 w-28 text-center">XẾP HẠNG</th>
                       <th className="py-2.5 px-4">LỚP</th>
                       <th className="py-2.5 px-4 w-32 text-right">TỔNG ĐIỂM</th>
@@ -917,6 +933,75 @@ export default function App() {
 
         </main>
       </div>
+
+      {/* MODAL ĐĂNG NHẬP (KIỂM TRA MẬT KHẨU CHÍNH XÁC) */}
+      {showLoginModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 antialiased">
+          <form onSubmit={handleLogin} className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-sm p-6 space-y-4 relative">
+            <button
+              type="button"
+              onClick={() => { setShowLoginModal(false); setLoginError(''); }}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="text-center space-y-1.5">
+              <div className="w-12 h-12 rounded-2xl bg-blue-600 text-white flex items-center justify-center font-bold text-xl mx-auto shadow-md">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <h2 className="text-base font-extrabold text-slate-800 pt-1">ĐĂNG NHẬP HỆ THỐNG</h2>
+              <p className="text-xs text-slate-500 font-medium">Quản Lý Thi Đua Học Sinh THPT</p>
+            </div>
+
+            {loginError && (
+              <div className="bg-rose-50 border border-rose-200 text-rose-600 text-xs p-2.5 rounded-xl font-bold flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{loginError}</span>
+              </div>
+            )}
+
+            <div className="space-y-3 pt-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Tài Khoản Lớp / Admin:</label>
+                <select
+                  value={loginSelectedAccount}
+                  onChange={(e) => setLoginSelectedAccount(e.target.value)}
+                  className="w-full text-xs font-semibold bg-slate-50 border border-slate-300 rounded-xl p-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                >
+                  <optgroup label="Tài Khoản Quản Trị">
+                    <option value="admin">Quản Trị Viên (Admin / Đoàn Trường)</option>
+                  </optgroup>
+                  <optgroup label="17 Tài Khoản Lớp">
+                    {CLASSES.map((cls) => (
+                      <option key={cls} value={cls}>Lớp {cls}</option>
+                    ))}
+                  </optgroup>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">Mật khẩu:</label>
+                <input
+                  type="password"
+                  value={loginPassword}
+                  onChange={(e) => setLoginPassword(e.target.value)}
+                  className="w-full text-xs bg-slate-50 border border-slate-300 rounded-xl p-2.5 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  placeholder="Nhập mật khẩu (VD: 10A1@tts2026)..."
+                  required
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md transition-all active:scale-[0.98]"
+              >
+                Xác Nhận Đăng Nhập
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* MODAL PICKER FOR SELECTING STUDENT FOR A SPECIFIC CRITERION */}
       {activeModalCode && (
