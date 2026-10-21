@@ -1,0 +1,6 @@
+{
+  "name": "TKTĐ Hàng Tuần - Hệ Thống Thi Đua Học Đường",
+  "description": "Hệ thống quản lý, nhập điểm và tổng kết thi đua hàng tuần theo nhóm lớp THPT với 38 tiêu chí thi đua",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
