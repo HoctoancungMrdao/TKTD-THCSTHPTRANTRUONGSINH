@@ -17,8 +17,13 @@ import {
   ListFilter,
   AlertTriangle,
   UserX,
-  LogIn
+  LogIn,
+  RefreshCw
 } from 'lucide-react';
+
+// Firebase Imports
+import { db } from './firebase';
+import { ref, onValue, set } from 'firebase/database';
 
 // ==========================================
 // 1. DATA TYPES & CONSTANTS
@@ -185,7 +190,7 @@ export default function App() {
   // Student picker modal
   const [activeModalCode, setActiveModalCode] = useState<string | null>(null);
 
-  // Database Store: dataStore[week][class] = { common: {...}, individual: {...} }
+  // Database Store: Đồng bộ trực tiếp từ Firebase Realtime Database
   const [dataStore, setDataStore] = useState<Record<number, Record<string, ClassWeekData>>>(() => {
     const saved = localStorage.getItem('thpt_thi_dua_db_react');
     if (saved) {
@@ -194,10 +199,25 @@ export default function App() {
     return {};
   });
 
-  // Save database on change
+  const [isSyncing, setIsSyncing] = useState<boolean>(true);
+
+  // LẮNG NGHE ĐỒNG BỘ REALTIME TỪ FIREBASE REALTIME DATABASE
   useEffect(() => {
-    localStorage.setItem('thpt_thi_dua_db_react', JSON.stringify(dataStore));
-  }, [dataStore]);
+    const dbRef = ref(db, 'thi_dua_data');
+    const unsubscribe = onValue(dbRef, (snapshot) => {
+      const val = snapshot.val();
+      if (val) {
+        setDataStore(val);
+        localStorage.setItem('thpt_thi_dua_db_react', JSON.stringify(val));
+      }
+      setIsSyncing(false);
+    }, (err) => {
+      console.error("Lỗi đồng bộ Firebase:", err);
+      setIsSyncing(false);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   // Check week locking time (Friday 21:00 auto-lock)
   useEffect(() => {
@@ -261,27 +281,35 @@ export default function App() {
     localStorage.removeItem('thpt_thi_dua_user_session');
   };
 
-  // Mutation Helper
+  // Mutation Helper (Đồng bộ lên Firebase Realtime Database)
   const updateClassData = (
     week: number,
     cls: string,
     updater: (prev: ClassWeekData) => ClassWeekData
   ) => {
-    setDataStore((prev) => {
-      const weekData = prev[week] || {};
-      const currentClassData = weekData[cls] || {
-        common: { '4': 0, '5': 0, '6': 0, '7': 0, '8': 0, '9': 0, '10': 0 },
-        individual: {}
-      };
+    const weekData = dataStore[week] || {};
+    const currentClassData = weekData[cls] || {
+      common: { '4': 0, '5': 0, '6': 0, '7': 0, '8': 0, '9': 0, '10': 0 },
+      individual: {}
+    };
 
-      return {
-        ...prev,
-        [week]: {
-          ...weekData,
-          [cls]: updater(currentClassData)
-        }
-      };
-    });
+    const updatedClassData = updater(currentClassData);
+    
+    // Tạo cấu trúc dữ liệu mới
+    const newStore = {
+      ...dataStore,
+      [week]: {
+        ...weekData,
+        [cls]: updatedClassData
+      }
+    };
+
+    // Cập nhật State cục bộ
+    setDataStore(newStore);
+
+    // Ghi dữ liệu đồng bộ lên Firebase
+    set(ref(db, `thi_dua_data/${week}/${cls}`), updatedClassData)
+      .catch((err) => console.error("Lỗi khi lưu lên Firebase:", err));
   };
 
   // Tab 1: Update Common Criteria (+ / -)
@@ -425,6 +453,15 @@ export default function App() {
                 <span className="font-bold text-slate-800 text-sm sm:text-base">
                   TUẦN {currentWeek} (19/10 - 23/10/2026)
                 </span>
+                {isSyncing ? (
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 text-amber-700 flex items-center gap-1 animate-pulse">
+                    <RefreshCw className="w-3 h-3 animate-spin" /> ĐANG KẾT NỐI REALTIME...
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700 flex items-center gap-1">
+                    🟢 REALTIME FIREBASE
+                  </span>
+                )}
                 {isSystemLocked ? (
                   <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-rose-100 text-rose-700 flex items-center gap-1">
                     <Lock className="w-3 h-3" /> KHÓA THỨ 6 (21:00)
